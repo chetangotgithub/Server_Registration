@@ -16,9 +16,29 @@ app.use(cors({
 
 app.use(express.json());
 
+// Initialize database connection (only once, not on every request)
+let dbInitialized = false;
+
+const initializeDatabase = async () => {
+  if (!dbInitialized) {
+    try {
+      await sequelize.authenticate();
+      console.log("MySQL connected");
+      await sequelize.sync({ alter: true });
+      console.log("Models synced");
+      dbInitialized = true;
+    } catch (err) {
+      console.error("Database initialization failed:", err);
+      throw err;
+    }
+  }
+};
 
 app.post("/register", async (req, res) => {
   try {
+    // Initialize database on first request
+    await initializeDatabase();
+
     const { name, email, password } = req.body;
     console.log(name, email, password);
 
@@ -50,27 +70,35 @@ app.post("/register", async (req, res) => {
       },
     });
   } catch (err) {
-    // Handle unique constraint error (duplicate email)
     if (err.name === 'SequelizeUniqueConstraintError' || err.name === 'SequelizeValidationError') {
       if (err.errors && err.errors.some(e => e.type === 'unique violation' || e.path === 'email')) {
         return res.status(400).json({ error: "Email already exists. Please use a different email address." });
       }
-      // Handle other validation errors
+
       const validationErrors = err.errors ? err.errors.map(e => e.message).join(', ') : err.message;
       return res.status(400).json({ error: validationErrors });
     }
-    // Handle other errors
     console.error("Registration error:", err);
     res.status(400).json({ error: err.message || "An error occurred during registration" });
   }
 });
 
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ message: "Server is running" });
+});
 
-sequelize.authenticate()
-  .then(() => console.log("MySQL connected"))
-  .catch(err => console.error("Connection failed:", err));
+// Export for Vercel serverless
+module.exports = app;
 
-sequelize.sync({ alter: true })
-  .then(() => console.log("Models synced"));
+// For local development
+if (require.main === module) {
+  sequelize.authenticate()
+    .then(() => console.log("MySQL connected"))
+    .catch(err => console.error("Connection failed:", err));
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+  sequelize.sync({ alter: true })
+    .then(() => console.log("Models synced"));
+
+  app.listen(3000, () => console.log("Server running on port 3000"));
+}
